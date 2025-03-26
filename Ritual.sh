@@ -10,6 +10,15 @@ fi
 # Script save path
 SCRIPT_PATH="$HOME/Ritual.sh"
 
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
 # Main menu function
 function main_menu() {
     while true; do
@@ -69,27 +78,41 @@ function install_ritual_node() {
     sudo apt update && sudo apt upgrade -y
 
     echo "Installing required packages..."
-    sudo apt -qy install curl git jq lz4 build-essential screen
+    sudo apt -qy install curl git jq lz4 build-essential screen nodejs npm
+
+    # Install Node.js 18 if not already installed
+    if ! command -v node &> /dev/null || [ "$(node -v | cut -d'.' -f1)" != "v18" ]; then
+        echo "Installing Node.js 18..."
+        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+        sudo apt-get install -y nodejs
+    fi
 
     # Check for Docker and Docker Compose
     echo "Checking if Docker is installed..."
-    if ! command -v docker &> /dev/null
-    then
+    if ! command -v docker &> /dev/null; then
         echo "Docker is not installed, installing Docker..."
         sudo apt -qy install docker.io
+        sudo systemctl enable --now docker
     else
         echo "Docker is already installed"
     fi
 
     echo "Checking if Docker Compose is installed..."
-    if ! command -v docker-compose &> /dev/null
-    then
+    if ! command -v docker-compose &> /dev/null; then
         echo "Docker Compose is not installed, installing Docker Compose..."
         sudo curl -L "https://github.com/docker/compose/releases/download/$(curl -s https://api.github.com/repos/docker/compose/releases/latest | jq -r .tag_name)/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
         sudo chmod +x /usr/local/bin/docker-compose
     else
         echo "Docker Compose is already installed"
     fi
+
+    # Install Ganache (local Ethereum node)
+    echo "Installing Ganache..."
+    sudo npm install -g ganache
+
+    # Start Ganache in a detached screen session
+    echo "Starting Ganache..."
+    screen -dmS ganache ganache --port 8545 --wallet.deterministic true
 
     # Clone Git repository and configure
     echo "Cloning the repository from GitHub..."
@@ -185,8 +208,7 @@ EOL
     rm -rf lib/forge-std
     rm -rf lib/infernet-sdk
 
-    if ! command -v forge &> /dev/null
-    then
+    if ! command -v forge &> /dev/null; then
         echo "forge command not found, attempting to install dependencies..."
         forge install --no-commit foundry-rs/forge-std
         forge install --no-commit ritual-net/infernet-sdk
@@ -203,13 +225,26 @@ EOL
     docker compose -f deploy/docker-compose.yaml up -d
     echo "Docker Compose started successfully!"
 
+    # Wait for Ganache to be ready
+    echo "Waiting for Ganache to be ready..."
+    sleep 15
+
     # Deploy contract
     echo "Deploying contract..."
     cd ~/infernet-container-starter
     project=hello-world make deploy-contracts
-    echo "Contract deployed successfully!"
+    if [ $? -eq 0 ]; then
+        echo "Contract deployed successfully!"
+    else
+        echo "Contract deployment failed. Trying alternative RPC..."
+        # Try with a different RPC if local deployment fails
+        export RPC_URL=https://mainnet.base.org/
+        project=hello-world make deploy-contracts
+    fi
 
     echo "Ritual Node installation completed!"
+    echo -e "${GREEN}Your Ritual Node is now running!${NC}"
+    echo -e "Check logs with: ${YELLOW}docker logs -f infernet-node${NC}"
 }
 
 # View Ritual Node logs
@@ -226,13 +261,23 @@ function remove_ritual_node() {
     echo "Stopping and removing Docker containers..."
     docker-compose -f ~/infernet-container-starter/deploy/docker-compose.yaml down
 
+    # Stop Ganache
+    echo "Stopping Ganache..."
+    screen -XS ganache quit
+
     # Delete repository files
     echo "Deleting related files..."
     rm -rf ~/infernet-container-starter
+    rm -rf ~/foundry
 
     # Delete Docker images
     echo "Deleting Docker images..."
     docker rmi ritualnetwork/hello-world-infernet:latest
+
+    # Remove Node.js and npm packages
+    echo "Removing Node.js packages..."
+    sudo npm uninstall -g ganache
+    sudo apt remove -y nodejs npm
 
     echo "Ritual Node has been successfully removed!"
 }
