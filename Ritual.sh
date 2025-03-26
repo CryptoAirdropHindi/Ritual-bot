@@ -1,9 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Check if the script is being run as root
+# Check if script is run as root
 if [ "$(id -u)" != "0" ]; then
-    echo "This script needs to be run as root."
-    echo "Please try using 'sudo -i' to switch to the root user and run the script again."
+    echo "This script requires root privileges."
+    echo "Please try running with 'sudo -i' to switch to root user, then run this script again."
     exit 1
 fi
 
@@ -25,9 +25,6 @@ function main_menu() {
             echo -e "=== 📱 Telegram: https://t.me/CryptoAirdropHindi6 ==="
             echo -e "=== 🎥 YouTube: https://www.youtube.com/@CryptoAirdropHindi6 ==="
             echo -e "=== 💻 GitHub Repo: https://github.com/CryptoAirdropHindi/ ==="
-            echo "This script is written by the Da Du Community, hahahaha."
-            echo "free and open source, do not trust paid versions."
-            echo "If you have any questions, contact via telegram. This is the only account."
             echo "================================================================"
             echo "To exit the script, press ctrl + C."
             echo "Please choose an operation:"
@@ -49,7 +46,7 @@ function main_menu() {
                 remove_ritual_node
                 ;;
             4)
-                echo "Exiting the script!"
+                echo "Exiting script!"
                 exit 0
                 ;;
             *)
@@ -62,156 +59,232 @@ function main_menu() {
     done
 }
 
-# Install Ritual Node
+# Install Ritual Node function
 function install_ritual_node() {
-    echo "Starting installation of Ritual Node..."
 
-    # Update system and install dependencies
-    echo "Updating system..."
-    sudo apt update && sudo apt upgrade -y
+# System update and essential package installation (including Python and pip)
+echo "Updating system and installing required packages..."
+sudo apt update && sudo apt upgrade -y
+sudo apt -qy install curl git jq lz4 build-essential screen python3 python3-pip
 
-    echo "Installing required packages..."
-    sudo apt -qy install curl git jq lz4 build-essential screen
+# Install or upgrade Python packages
+echo "[Info] Upgrading pip3 and installing infernet-cli / infernet-client"
+pip3 install --upgrade pip
+pip3 install infernet-cli infernet-client
 
-    # Check for Docker and Docker Compose
-    echo "Checking if Docker is installed..."
-    if ! command -v docker &> /dev/null
-    then
-        echo "Docker is not installed, installing Docker..."
-        sudo apt -qy install docker.io
-    else
-        echo "Docker is already installed"
-    fi
+ 
+# Check Docker installation
+ 
+echo "Checking Docker installation..."
+if command -v docker &> /dev/null; then
+  echo " - Docker already installed, skipping."
+else
+  echo " - Docker not found, installing..."
+  sudo apt install -y docker.io
+  sudo systemctl enable docker
+  sudo systemctl start docker
+fi
 
-    echo "Checking if Docker Compose is installed..."
-    if ! command -v docker-compose &> /dev/null
-    then
-        echo "Docker Compose is not installed, installing Docker Compose..."
-        sudo curl -L "https://github.com/docker/compose/releases/download/$(curl -s https://api.github.com/repos/docker/compose/releases/latest | jq -r .tag_name)/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        sudo chmod +x /usr/local/bin/docker-compose
-    else
-        echo "Docker Compose is already installed"
-    fi
+ 
+# Check Docker Compose installation
+ 
+echo "Checking Docker Compose installation..."
+if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+  echo " - Docker Compose not found, installing..."
+  sudo curl -L "https://github.com/docker/compose/releases/download/v2.29.2/docker-compose-$(uname -s)-$(uname -m)" \
+       -o /usr/local/bin/docker-compose
+  sudo chmod +x /usr/local/bin/docker-compose
 
-    # Clone Git repository and configure
-    echo "Cloning the repository from GitHub..."
-    git clone https://github.com/ritual-net/infernet-container-starter ~/infernet-container-starter
-    cd ~/infernet-container-starter
+  DOCKER_CONFIG=${DOCKER_CONFIG:-$HOME/.docker}
+  mkdir -p "$DOCKER_CONFIG/cli-plugins"
+  curl -SL "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64" \
+      -o "$DOCKER_CONFIG/cli-plugins/docker-compose"
+  chmod +x "$DOCKER_CONFIG/cli-plugins/docker-compose"
+else
+  echo " - Docker Compose already installed, skipping."
+fi
 
-    # User input for private key (input is invisible)
-    echo "Please enter your wallet private key (input will be hidden):"
-    read -s PRIVATE_KEY
+echo "[Verification] Docker Compose version:"
+docker compose version || docker-compose version
 
-    # Write configuration file
-    echo "Writing the configuration file..."
-    cat > deploy/config.json <<EOL
-{
-    "log_path": "infernet_node.log",
-    "server": {
-        "port": 4000,
-        "rate_limit": {
-            "num_requests": 100,
-            "period": 100
-        }
-    },
-    "chain": {
-        "enabled": true,
-        "trail_head_blocks": 3,
-        "rpc_url": "https://mainnet.base.org/",
-        "registry_address": "0x3B1554f346DFe5c482Bb4BA31b880c1C18412170",
-        "wallet": {
-          "max_gas_limit": 4000000,
-          "private_key": "$PRIVATE_KEY",
-          "allowed_sim_errors": []
-        },
-        "snapshot_sync": {
-          "sleep": 3,
-          "batch_size": 10000,
-          "starting_sub_id": 180000,
-          "sync_period": 30
-        }
-    },
-    "startup_wait": 1.0,
-    "redis": {
-        "host": "redis",
-        "port": 6379
-    },
-    "forward_stats": true,
-    "containers": [
-        {
-            "id": "hello-world",
-            "image": "ritualnetwork/hello-world-infernet:latest",
-            "external": true,
-            "port": "3000",
-            "allowed_delegate_addresses": [],
-            "allowed_addresses": [],
-            "allowed_ips": [],
-            "command": "--bind=0.0.0.0:3000 --workers=2",
-            "env": {},
-            "volumes": [],
-            "accepted_payments": {},
-            "generates_proofs": false
-        }
-    ]
+ 
+# Install Foundry and set environment variables
+ 
+echo
+echo "Installing Foundry"
+# Stop anvil if running
+if pgrep anvil &>/dev/null; then
+  echo "[Warning] anvil is running, stopping to update Foundry."
+  pkill anvil
+  sleep 2
+fi
+
+cd ~ || exit 1
+mkdir -p foundry
+cd foundry
+curl -L https://foundry.paradigm.xyz | bash
+
+# Install or update
+$HOME/.foundry/bin/foundryup
+
+# Add ~/.foundry/bin to PATH
+if [[ ":$PATH:" != *":$HOME/.foundry/bin:"* ]]; then
+  export PATH="$HOME/.foundry/bin:$PATH"
+fi
+
+echo "[Verification] forge version:"
+forge --version || {
+  echo "[Error] forge command not found, may be due to ~/.foundry/bin not in PATH or installation failed."
+  exit 1
 }
-EOL
 
-    echo "Configuration file successfully written!"
+# Remove /usr/bin/forge to prevent ZOE error
+if [ -f /usr/bin/forge ]; then
+  echo "[Info] Removing /usr/bin/forge..."
+  sudo rm /usr/bin/forge
+fi
 
-    # Install Foundry
-    echo "Installing Foundry..."
-    mkdir -p ~/foundry && cd ~/foundry
-    curl -L https://foundry.paradigm.xyz | bash
+echo "[Info] Foundry installation and environment setup complete."
+cd ~ || exit 1
 
-    # Immediately load new environment variables
-    source ~/.bashrc
+ 
+# Clone infernet-container-starter
+ 
+echo
+echo "Cloning infernet-container-starter..."
+git clone https://github.com/ritual-net/infernet-container-starter
+cd infernet-container-starter || { echo "[Error] Failed to enter directory"; exit 1; }
+docker pull ritualnetwork/hello-world-infernet:latest
 
-    # Wait for environment variables to take effect
-    echo "Waiting for Foundry environment variables to take effect..."
-    sleep 2
+ 
+# Initial deployment in screen session (make deploy-container)
+ 
+echo "[6] Starting container deployment in screen session (ritual)..."
+sleep 1
+screen -S ritual -dm bash -c '
+project=hello-world make deploy-container;
+exec bash
+'
 
-    # Verify if `foundryup` is installed successfully
-    foundryup
-    if [ $? -ne 0 ]; then
-        echo "foundryup installation failed, command not found. Please check the installation process."
-        exit 1
-    fi
+echo "[Info] Deployment is running in background screen session (ritual)."
 
-    echo "Foundry installation complete!"
+ 
+# User input (Private Key)
+ 
+echo
+echo "Configuring Ritual Node files..."
 
-    # Install contract dependencies
-    echo "Entering contracts directory and installing dependencies..."
-    cd ~/infernet-container-starter/projects/hello-world/contracts
+read -p "Enter your Private Key (0x...): " PRIVATE_KEY
 
-    # Remove existing invalid directories
-    rm -rf lib/forge-std
-    rm -rf lib/infernet-sdk
+# Default settings
+RPC_URL="https://base.drpc.org"
+RPC_URL_SUB="https://mainnet.base.org/"
+# Registry address
+REGISTRY="0x3B1554f346DFe5c482Bb4BA31b880c1C18412170"
+SLEEP=3
+START_SUB_ID=160000
+BATCH_SIZE=50  # Recommended for public RPC
+TRAIL_HEAD_BLOCKS=3
+INFERNET_VERSION="1.4.0"  # infernet image tag
 
-    if ! command -v forge &> /dev/null
-    then
-        echo "forge command not found, attempting to install dependencies..."
-        forge install --no-commit foundry-rs/forge-std
-        forge install --no-commit ritual-net/infernet-sdk
-    else
-        echo "forge is already installed, installing dependencies..."
-        forge install --no-commit foundry-rs/forge-std
-        forge install --no-commit ritual-net/infernet-sdk
-    fi
-    echo "Dependencies installed!"
+ 
+# Modify config.json / Deploy.s.sol / docker-compose.yaml / Makefile
+ 
 
-    # Start Docker Compose
-    echo "Starting Docker Compose..."
-    cd ~/infernet-container-starter
-    docker compose -f deploy/docker-compose.yaml up -d
-    echo "Docker Compose started successfully!"
+# Modify deploy/config.json
+sed -i "s|\"registry_address\": \".*\"|\"registry_address\": \"$REGISTRY\"|" deploy/config.json
+sed -i "s|\"private_key\": \".*\"|\"private_key\": \"$PRIVATE_KEY\"|" deploy/config.json
+sed -i "s|\"sleep\": [0-9]*|\"sleep\": $SLEEP|" deploy/config.json
+sed -i "s|\"starting_sub_id\": [0-9]*|\"starting_sub_id\": $START_SUB_ID|" deploy/config.json
+sed -i "s|\"batch_size\": [0-9]*|\"batch_size\": $BATCH_SIZE|" deploy/config.json
+sed -i "s|\"trail_head_blocks\": [0-9]*|\"trail_head_blocks\": $TRAIL_HEAD_BLOCKS|" deploy/config.json
+sed -i 's|"rpc_url": ".*"|"rpc_url": "https://mainnet.base.org"|' deploy/config.json
+sed -i 's|"rpc_url": ".*"|"rpc_url": "https://mainnet.base.org"|' projects/hello-world/container/config.json
 
-    # Deploy contract
-    echo "Deploying contract..."
-    cd ~/infernet-container-starter
-    project=hello-world make deploy-contracts
-    echo "Contract deployed successfully!"
 
-    echo "Ritual Node installation completed!"
+# Modify projects/hello-world/container/config.json
+sed -i "s|\"registry_address\": \".*\"|\"registry_address\": \"$REGISTRY\"|" projects/hello-world/container/config.json
+sed -i "s|\"private_key\": \".*\"|\"private_key\": \"$PRIVATE_KEY\"|" projects/hello-world/container/config.json
+sed -i "s|\"sleep\": [0-9]*|\"sleep\": $SLEEP|" projects/hello-world/container/config.json
+sed -i "s|\"starting_sub_id\": [0-9]*|\"starting_sub_id\": $START_SUB_ID|" projects/hello-world/container/config.json
+sed -i "s|\"batch_size\": [0-9]*|\"batch_size\": $BATCH_SIZE|" projects/hello-world/container/config.json
+sed -i "s|\"trail_head_blocks\": [0-9]*|\"trail_head_blocks\": $TRAIL_HEAD_BLOCKS|" projects/hello-world/container/config.json
+
+# Modify Deploy.s.sol
+sed -i "s|\(registry\s*=\s*\).*|\1$REGISTRY;|" projects/hello-world/contracts/script/Deploy.s.sol
+sed -i "s|\(RPC_URL\s*=\s*\).*|\1\"$RPC_URL\";|" projects/hello-world/contracts/script/Deploy.s.sol
+
+# Use latest node image
+sed -i 's|ritualnetwork/infernet-node:[^"]*|ritualnetwork/infernet-node:latest|' deploy/docker-compose.yaml
+
+# Modify Makefile (sender, RPC_URL)
+MAKEFILE_PATH="projects/hello-world/contracts/Makefile"
+sed -i "s|^sender := .*|sender := $PRIVATE_KEY|"  "$MAKEFILE_PATH"
+sed -i "s|^RPC_URL := .*|RPC_URL := $RPC_URL|"    "$MAKEFILE_PATH"
+
+ 
+# Restart containers
+ 
+echo
+echo "Running docker compose down & up..."
+docker compose -f deploy/docker-compose.yaml down
+docker compose -f deploy/docker-compose.yaml up -d
+
+echo
+echo "[Info] Containers running in background (-d)."
+echo "Check status with: docker ps. View logs: docker logs infernet-node"
+
+ 
+# Install Forge libraries (resolve conflicts)
+ 
+echo
+echo "Installing Forge (project dependencies)"
+cd ~/infernet-container-starter/projects/hello-world/contracts || exit 1
+rm -rf lib/forge-std
+rm -rf lib/infernet-sdk
+
+forge install --no-commit foundry-rs/forge-std
+forge install --no-commit ritual-net/infernet-sdk
+
+# Restart containers
+echo
+echo "Restarting docker compose..."
+cd ~/infernet-container-starter || exit 1
+docker compose -f deploy/docker-compose.yaml down
+docker compose -f deploy/docker-compose.yaml up -d
+echo "[Info] View infernet-node logs: docker logs infernet-node"
+
+ 
+# Deploy project contracts 
+ 
+echo
+echo "Deploying project contracts..."
+DEPLOY_OUTPUT=$(project=hello-world make deploy-contracts 2>&1)
+echo "$DEPLOY_OUTPUT"
+
+# Extract newly deployed contract address (e.g.: Deployed SaysHello:  0x...)
+NEW_ADDR=$(echo "$DEPLOY_OUTPUT" | grep -oP 'Deployed SaysHello:\s+\K0x[0-9a-fA-F]{40}')
+if [ -z "$NEW_ADDR" ]; then
+  echo "[Warning] No new contract address found. May need manual update to CallContract.s.sol."
+else
+  echo "[Info] Deployed SaysHello address: $NEW_ADDR"
+  # Replace old address with new one in CallContract.s.sol
+  # Example: SaysGM saysGm = SaysGM(0x13D69Cf7...) -> SaysGM saysGm = SaysGM(0xA529dB3c9...)
+  sed -i "s|SaysGM saysGm = SaysGM(0x[0-9a-fA-F]\+);|SaysGM saysGm = SaysGM($NEW_ADDR);|" \
+      projects/hello-world/contracts/script/CallContract.s.sol
+
+  # Execute call-contract
+  echo
+  echo "Executing call-contract with new address..."
+  project=hello-world make call-contract
+fi
+
+echo
+echo "===== Ritual Node Setup Complete ====="
+
+  # Prompt to return to main menu
+  read -n 1 -s -r -p "Press any key to return to main menu..."
+  main_menu
 }
 
 # View Ritual Node logs
@@ -228,15 +301,15 @@ function remove_ritual_node() {
     echo "Stopping and removing Docker containers..."
     docker-compose -f ~/infernet-container-starter/deploy/docker-compose.yaml down
 
-    # Delete repository files
-    echo "Deleting related files..."
+    # Remove repository files
+    echo "Removing related files..."
     rm -rf ~/infernet-container-starter
 
-    # Delete Docker images
-    echo "Deleting Docker images..."
+    # Remove Docker images
+    echo "Removing Docker images..."
     docker rmi ritualnetwork/hello-world-infernet:latest
 
-    echo "Ritual Node has been successfully removed!"
+    echo "Ritual Node successfully removed!"
 }
 
 # Call main menu function
