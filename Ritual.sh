@@ -35,24 +35,24 @@ function main_menu() {
         
         read -p "Enter your choice: " choice
 
-        case $choice in
-            1) 
-                install_ritual_node
-                ;;
-            2)
-                view_logs
-                ;;
-            3)
-                remove_ritual_node
-                ;;
-            4)
-                echo "Exiting script!"
-                exit 0
-                ;;
-            *)
-                echo "Invalid option, please try again."
-                ;;
-        esac
+case $choice in
+    1|1.) 
+        install_ritual_node
+        ;;
+    2|2.)
+        view_logs
+        ;;
+    3|3.)
+        remove_ritual_node
+        ;;
+    4|4.)
+        echo "Exiting script!"
+        exit 0
+        ;;
+    *)
+        echo "Invalid option, please try again."
+        ;;
+esac
 
         echo "Press any key to continue..."
         read -n 1 -s
