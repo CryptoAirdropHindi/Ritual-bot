@@ -19,12 +19,62 @@ fi
 # Script save path
 SCRIPT_PATH="$HOME/Ritual.sh"
 
+# Function to check Docker installation
+check_docker() {
+    if ! command -v docker &>/dev/null; then
+        echo -e "${YELLOW}Installing Docker...${NC}"
+        sudo apt install -y docker.io
+        sudo systemctl enable docker
+        sudo systemctl start docker
+    fi
+}
+
+# Function to check Docker Compose installation
+check_docker_compose() {
+    if ! command -v docker-compose &>/dev/null && ! docker compose version &>/dev/null; then
+        echo -e "${YELLOW}Installing Docker Compose...${NC}"
+        sudo curl -L "https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-$(uname -s)-$(uname -m)" \
+             -o /usr/local/bin/docker-compose
+        sudo chmod +x /usr/local/bin/docker-compose
+    fi
+}
+
+# Function to check Foundry installation
+check_foundry() {
+    if ! command -v forge &>/dev/null; then
+        echo -e "${YELLOW}Installing Foundry...${NC}"
+        curl -L https://foundry.paradigm.xyz | bash
+        source $HOME/.bashrc
+        foundryup
+    fi
+}
+
+# Function to validate Ethereum address
+validate_eth_address() {
+    local address=$1
+    if [[ $address =~ ^0x[a-fA-F0-9]{40}$ ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to validate private key
+validate_private_key() {
+    local key=$1
+    if [[ $key =~ ^0x[a-fA-F0-9]{64}$ ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Enhanced main menu with ASCII art and social links
 function main_menu() {
     while true; do
         clear
         echo -e "${CYAN}"
-         echo -e "   ${RED}██████╗ ██╗████████╗██╗   ██╗ █████╗ ██╗     ${NC}"
+        echo -e "   ${RED}██████╗ ██╗████████╗██╗   ██╗ █████╗ ██╗     ${NC}"
         echo -e "   ${GREEN}██╔══██╗██║╚══██╔══╝██║   ██║██╔══██╗██║     ${NC}"
         echo -e "   ${YELLOW}██████╔╝██║   ██║   ██║   ██║███████║██║     ${NC}"
         echo -e "   ${MAGENTA}██╔══██╗██║   ██║   ██║   ██║██╔══██║██║     ${NC}"
@@ -41,15 +91,19 @@ function main_menu() {
         echo -e "1) ${GREEN}Install Ritual Node${NC}"
         echo -e "2) ${BLUE}View Node Logs${NC}"
         echo -e "3) ${RED}Remove Node${NC}"
-        echo -e "4) ${YELLOW}Exit${NC}"
+        echo -e "4) ${YELLOW}Check Node Status${NC}"
+        echo -e "5) ${MAGENTA}Update Script${NC}"
+        echo -e "6) ${CYAN}Exit${NC}"
         
-        read -p "$(echo -e "${CYAN}Enter your choice [1-4]: ${NC}")" choice
+        read -p "$(echo -e "${CYAN}Enter your choice [1-6]: ${NC}")" choice
 
         case $choice in
             1) install_ritual_node ;;
             2) view_logs ;;
             3) remove_ritual_node ;;
-            4) Exit ;;
+            4) check_node_status ;;
+            5) update_script ;;
+            6) 
                 echo -e "${GREEN}Exiting script. Thank you!${NC}"
                 exit 0 
                 ;;
@@ -71,7 +125,7 @@ function install_ritual_node() {
     # Private key validation
     while true; do
         read -p "$(echo -e "${CYAN}Enter your Private Key (0x...): ${NC}")" PRIVATE_KEY
-        if [[ $PRIVATE_KEY =~ ^0x[a-fA-F0-9]{64}$ ]]; then
+        if validate_private_key "$PRIVATE_KEY"; then
             break
         else
             echo -e "${RED}Invalid private key format! Must be 64 hex chars starting with 0x${NC}"
@@ -81,7 +135,7 @@ function install_ritual_node() {
     # Wallet address validation
     while true; do
         read -p "$(echo -e "${CYAN}Enter Wallet Address (0x...): ${NC}")" WALLET_ADDRESS
-        if [[ $WALLET_ADDRESS =~ ^0x[a-fA-F0-9]{40}$ ]]; then
+        if validate_eth_address "$WALLET_ADDRESS"; then
             break
         else
             echo -e "${RED}Invalid wallet address format! Must be 40 hex chars starting with 0x${NC}"
@@ -99,29 +153,10 @@ function install_ritual_node() {
     sudo apt update && sudo apt upgrade -y
     sudo apt install -y curl git docker.io python3 python3-pip jq lz4 build-essential screen
 
-    # Docker setup
-    if ! command -v docker &>/dev/null; then
-        echo -e "${YELLOW}Installing Docker...${NC}"
-        sudo apt install -y docker.io
-        sudo systemctl enable docker
-        sudo systemctl start docker
-    fi
-
-    # Docker Compose setup
-    if ! command -v docker-compose &>/dev/null && ! docker compose version &>/dev/null; then
-        echo -e "${YELLOW}Installing Docker Compose...${NC}"
-        sudo curl -L "https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-$(uname -s)-$(uname -m)" \
-             -o /usr/local/bin/docker-compose
-        sudo chmod +x /usr/local/bin/docker-compose
-    fi
-
-    # Foundry installation
-    echo -e "${YELLOW}Installing Foundry...${NC}"
-    if ! command -v forge &>/dev/null; then
-        curl -L https://foundry.paradigm.xyz | bash
-        source $HOME/.bashrc
-        foundryup
-    fi
+    # Check and install required components
+    check_docker
+    check_docker_compose
+    check_foundry
 
     # Clone repository
     echo -e "\n${GREEN}>>> Setting up Infernet Node...${NC}"
@@ -223,6 +258,60 @@ function remove_ritual_node() {
         echo -e "\n${GREEN}Ritual Node has been completely removed.${NC}"
     else
         echo -e "${GREEN}Node removal cancelled.${NC}"
+    fi
+}
+
+# Function to check node status
+function check_node_status() {
+    echo -e "${YELLOW}=== Node Status Check ===${NC}"
+    
+    # Check if Docker is running
+    if ! systemctl is-active --quiet docker; then
+        echo -e "${RED}Docker service is not running!${NC}"
+        echo -e "Try starting it with: ${CYAN}sudo systemctl start docker${NC}"
+        return 1
+    fi
+    
+    # Check if containers are running
+    if docker ps | grep -q "infernet-node"; then
+        echo -e "${GREEN}✓ Node container is running${NC}"
+        
+        # Check for recent logs
+        echo -e "\n${CYAN}=== Recent Logs ===${NC}"
+        docker logs --tail=20 infernet-node
+    else
+        echo -e "${RED}✗ Node container is not running${NC}"
+        echo -e "Check all containers with: ${CYAN}docker ps -a${NC}"
+    fi
+    
+    # Check disk space
+    echo -e "\n${CYAN}=== Disk Space ===${NC}"
+    df -h
+    
+    # Check memory usage
+    echo -e "\n${CYAN}=== Memory Usage ===${NC}"
+    free -h
+}
+
+# Function to update the script
+function update_script() {
+    echo -e "${YELLOW}=== Updating Script ===${NC}"
+    echo -e "${CYAN}Downloading latest version...${NC}"
+    
+    if curl -sSf https://raw.githubusercontent.com/CryptoAirdropHindi/Ritual-bot/main/Ritual.sh > /tmp/Ritual_new.sh; then
+        if ! diff /tmp/Ritual_new.sh "$SCRIPT_PATH" >/dev/null; then
+            mv /tmp/Ritual_new.sh "$SCRIPT_PATH"
+            chmod +x "$SCRIPT_PATH"
+            echo -e "${GREEN}Script updated successfully!${NC}"
+            echo -e "${YELLOW}Please restart the script to use the new version.${NC}"
+            exit 0
+        else
+            echo -e "${GREEN}You already have the latest version.${NC}"
+            rm /tmp/Ritual_new.sh
+        fi
+    else
+        echo -e "${RED}Failed to download update. Check your internet connection.${NC}"
+        return 1
     fi
 }
 
